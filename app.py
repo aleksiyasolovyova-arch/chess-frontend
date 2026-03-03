@@ -32,7 +32,6 @@ LOGO_ROOK_PATH = ASSETS / "images" / "logo_rook.png"
 _logo_rook_b64 = base64.b64encode(LOGO_ROOK_PATH.read_bytes()).decode()
 
 
-
 _rook_icon = Image.open(LOGO_ROOK_PATH)
 st.set_page_config(page_title="Chess Scoresheet", page_icon=_rook_icon, layout="wide")
 
@@ -62,7 +61,7 @@ st.markdown(
 
 # Custom CSS for chess theme
 st.markdown(
-    f"""
+    """
     <style>
     .stApp {{
         min-height: 100vh;
@@ -377,9 +376,11 @@ st.markdown(
     f"""
     <div class="navbar">
         <div class="navbar-center">
-            <img src="data:image/png;base64,{_logo_rook_b64}" alt="Chesslooks Lier Rook" style="width:120px;height:auto;">
+            <img src="data:image/png;base64,{_logo_rook_b64}"
+                alt="Chesslooks Lier Rook" style="width:120px;height:auto;">
             <div class="navbar-text">
-                <img src="data:image/png;base64,{_logo_letters_b64}" alt="Chesslooks Lier" style="width:200px;height:auto;margin-left:-10px;">
+                <img src="data:image/png;base64,{_logo_letters_b64}"
+                    alt="Chesslooks Lier" style="width:200px;height:auto;margin-left:-10px;">
                 <div class="hero-subtitle">{t["scoresheet_upload"]}</div>
             </div>
         </div>
@@ -414,6 +415,7 @@ with col_center:
         type=["jpg", "jpeg", "png", "webp", "pdf"],
         label_visibility="collapsed",
     )
+
 
 @st.dialog(t["result_title"], width="large")
 def show_result(data):
