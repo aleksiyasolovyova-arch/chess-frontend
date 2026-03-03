@@ -1,12 +1,16 @@
 import base64
+import os
 import time
 from pathlib import Path
 
+from dotenv import load_dotenv
 import streamlit as st
 import requests
 from PIL import Image
 
-API_URL = "http://localhost:8000"
+load_dotenv()
+
+API_URL = os.getenv("API_URL", "http://localhost:8000")
 MAX_SIZE = 10 * 1024 * 1024  # 10 MB
 ACCEPTED_TYPES = ["image/jpeg", "image/png", "image/webp", "application/pdf"]
 
