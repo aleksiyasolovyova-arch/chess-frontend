@@ -5,6 +5,7 @@ include:
 stages:
   - lint
   - build
+  - test
   - package
 
 # Override security jobs to make them blocking
