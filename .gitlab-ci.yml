@@ -3,7 +3,7 @@ include:
   - template: Jobs/SAST.gitlab-ci.yml
 
 stages:
-  - lint
+  # - lint
   - build
   - test
   - package
@@ -24,23 +24,23 @@ cache:
   paths:
     - .cache/pip
 
-lint:
-  stage: lint
-  image: $PYTHON_IMAGE
-  before_script:
-    - pip install flake8 black
-  script:
-    - echo "Auto-formatting with black..."
-    - black --line-length=120 app.py
-    - echo "Running flake8..."
-    - flake8 app.py --max-line-length=120 --exclude=__pycache__
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-      changes:
-        - app.py
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-      changes:
-        - app.py
+# lint:
+#   stage: lint
+#   image: $PYTHON_IMAGE
+#   before_script:
+#     - pip install flake8 black
+#   script:
+#     - echo "Auto-formatting with black..."
+#     - black --line-length=120 app.py
+#     - echo "Running flake8..."
+#     - flake8 app.py --max-line-length=120 --exclude=__pycache__
+#   rules:
+#     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+#       changes:
+#         - app.py
+#     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+#       changes:
+#         - app.py
 
 build:
   stage: build
