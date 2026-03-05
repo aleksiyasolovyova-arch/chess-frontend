@@ -509,11 +509,15 @@ def show_result(data):
                         w_status = "OK"
                     else:
                         w_status = f'ILLEGAL – {w_res.get("reason", "")}'
+                        if w_res.get("suggestion"):
+                            w_status += f' (suggestion: {w_res["suggestion"]})'
                 if b_res:
                     if b_res["legal"]:
                         b_status = "OK"
                     else:
                         b_status = f'ILLEGAL – {b_res.get("reason", "")}'
+                        if b_res.get("suggestion"):
+                            b_status += f' (suggestion: {b_res["suggestion"]})'
                 rows += f"| {move_num} | {w} | {w_status} | {b} | {b_status} |\n"
             else:
                 rows += f"| {move_num} | {w} | {b} |\n"
