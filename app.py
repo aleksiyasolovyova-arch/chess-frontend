@@ -1,12 +1,16 @@
 import base64
+import os
 import time
 from pathlib import Path
 
+from dotenv import load_dotenv
 import streamlit as st
 import requests
 from PIL import Image
 
-API_URL = "http://localhost:8000"
+load_dotenv()
+
+API_URL = os.getenv("API_URL", "http://localhost:8000")
 MAX_SIZE = 10 * 1024 * 1024  # 10 MB
 ACCEPTED_TYPES = ["image/jpeg", "image/png", "image/webp", "application/pdf"]
 
@@ -26,7 +30,6 @@ _logo_pic_b64 = base64.b64encode(LOGO_PIC_PATH.read_bytes()).decode()
 
 LOGO_ROOK_PATH = ASSETS / "images" / "logo_rook.png"
 _logo_rook_b64 = base64.b64encode(LOGO_ROOK_PATH.read_bytes()).decode()
-
 
 
 _rook_icon = Image.open(LOGO_ROOK_PATH)
@@ -58,7 +61,7 @@ st.markdown(
 
 # Custom CSS for chess theme
 st.markdown(
-    f"""
+    """
     <style>
     .stApp {{
         min-height: 100vh;
@@ -308,7 +311,6 @@ T = {
         "validation_failed": "Validation failed",
         "file_too_large": "File too large. Maximum size is 10 MB.",
         "processing": "Processing scoresheet...",
-        "upload": "Upload",
         "upload_failed": "Upload failed",
         "no_backend": "Cannot connect to backend. Is FastAPI running on localhost:8000?",
     },
@@ -334,7 +336,6 @@ T = {
         "validation_failed": "Validatie mislukt",
         "file_too_large": "Bestand te groot. Maximale grootte is 10 MB.",
         "processing": "Scoreblad verwerken...",
-        "upload": "Uploaden",
         "upload_failed": "Uploaden mislukt",
         "no_backend": "Kan geen verbinding maken met de backend. Draait FastAPI op localhost:8000?",
     },
@@ -360,7 +361,6 @@ T = {
         "validation_failed": "\u00c9chec de la validation",
         "file_too_large": "Fichier trop volumineux. La taille maximale est de 10 Mo.",
         "processing": "Traitement de la feuille de match...",
-        "upload": "T\u00e9l\u00e9charger",
         "upload_failed": "\u00c9chec du t\u00e9l\u00e9chargement",
         "no_backend": "Impossible de se connecter au backend. FastAPI tourne-t-il sur localhost:8000 ?",
     },
@@ -376,9 +376,11 @@ st.markdown(
     f"""
     <div class="navbar">
         <div class="navbar-center">
-            <img src="data:image/png;base64,{_logo_rook_b64}" alt="Chesslooks Lier Rook" style="width:120px;height:auto;">
+            <img src="data:image/png;base64,{_logo_rook_b64}"
+                alt="Chesslooks Lier Rook" style="width:120px;height:auto;">
             <div class="navbar-text">
-                <img src="data:image/png;base64,{_logo_letters_b64}" alt="Chesslooks Lier" style="width:200px;height:auto;margin-left:-10px;">
+                <img src="data:image/png;base64,{_logo_letters_b64}"
+                    alt="Chesslooks Lier" style="width:200px;height:auto;margin-left:-10px;">
                 <div class="hero-subtitle">{t["scoresheet_upload"]}</div>
             </div>
         </div>
@@ -408,23 +410,19 @@ if lang_code != st.session_state.get("_last_val_lang"):
 # Upload area — centered using columns
 _, col_center, _ = st.columns([1, 2, 1])
 with col_center:
-    with st.form("upload_form"):
-        uploaded_file = st.file_uploader(
-            "Upload scoresheet",
-            type=["jpg", "jpeg", "png", "webp", "pdf"],
-            label_visibility="collapsed",
-        )
-        upload_clicked = st.form_submit_button(
-            t["upload"],
-            use_container_width=True,
-        )
+    uploaded_file = st.file_uploader(
+        "Upload scoresheet",
+        type=["jpg", "jpeg", "png", "webp", "pdf"],
+        label_visibility="collapsed",
+    )
+
 
 @st.dialog(t["result_title"], width="large")
 def show_result(data):
     if "validation_results" not in st.session_state:
         st.session_state.validation_results = None
     if "editing_moves" not in st.session_state:
-        st.session_state.editing_moves = True  # kept for compatibility
+        st.session_state.editing_moves = True
 
     col_w, col_we, col_b, col_be = st.columns([3, 1, 3, 1])
     with col_w:
@@ -442,55 +440,113 @@ def show_result(data):
     with col_t:
         tournament = st.text_input(t["tournament"], value=data.get("tournament", ""))
 
-    raw_moves = data.get("moves", [])
-    moves = [m["raw_input"] if isinstance(m, dict) else m for m in raw_moves]
+    moves = data.get("moves", [])
     val_results = st.session_state.validation_results
 
-    # ── Always in edit mode: text inputs for each move ──
-    st.markdown(f'**{t["moves"]}**')
+    if st.session_state.editing_moves:
+        # ── Edit mode: text inputs for each move ──
+        hdr_left, hdr_right = st.columns([5, 1])
+        with hdr_left:
+            st.markdown(f'**{t["moves_editing"]}**')
+        with hdr_right:
+            if st.button(t["done"], key="done_editing", use_container_width=True):
+                committed = []
+                for i in range(0, len(moves), 2):
+                    move_num = i // 2 + 1
+                    committed.append(st.session_state.get(f"w_{move_num}", ""))
+                    committed.append(st.session_state.get(f"b_{move_num}", ""))
+                st.session_state.committed_moves = committed
+                st.session_state.editing_moves = False
+                st.rerun()
 
-    edited_moves = []
-    for i in range(0, len(moves), 2):
-        move_num = i // 2 + 1
-        # Determine validation status for this pair
-        w_status = ""
-        b_status = ""
+        edited_moves = []
+        for i in range(0, len(moves), 2):
+            move_num = i // 2 + 1
+            c1, c2, c3 = st.columns([0.5, 2, 2])
+            with c1:
+                st.markdown(f"**{move_num}.**")
+            with c2:
+                # Extract san_intent from MoveDTO dict
+                w_move_dict = moves[i] if i < len(moves) else {}
+                w_move_str = w_move_dict.get("san_intent", "") if isinstance(w_move_dict, dict) else str(w_move_dict)
+                w_move = st.text_input(
+                    f"W{move_num}", value=w_move_str,
+                    label_visibility="collapsed", key=f"w_{move_num}",
+                )
+                edited_moves.append(w_move)
+            with c3:
+                b_move_dict = moves[i + 1] if i + 1 < len(moves) else {}
+                b_move_str = b_move_dict.get("san_intent", "") if isinstance(b_move_dict, dict) else str(b_move_dict)
+                b_move = st.text_input(
+                    f"B{move_num}", value=b_move_str,
+                    label_visibility="collapsed", key=f"b_{move_num}",
+                )
+                edited_moves.append(b_move)
+
+    else:
+        # ── Table mode: read-only moves with validation status ──
+        hdr_left, hdr_right = st.columns([5, 1])
+        with hdr_left:
+            st.markdown(f'**{t["moves"]}**')
+        with hdr_right:
+            if st.button(":material/edit:", key="edit_moves", use_container_width=True):
+                st.session_state.editing_moves = True
+                st.rerun()
+
+        # Build the table
+        header = f'| # | {t["white"]} | {t["black"]} |'
+        separator = "|---|-------|-------|"
         if val_results:
-            w_res = val_results[i] if i < len(val_results) else None
-            b_res = val_results[i + 1] if i + 1 < len(val_results) else None
-            if w_res and not w_res["legal"]:
-                w_status = f'ILLEGAL – {w_res.get("reason", "")}'
-            if b_res and not b_res["legal"]:
-                b_status = f'ILLEGAL – {b_res.get("reason", "")}'
+            header = f'| # | {t["white"]} | {t["status"]} | {t["black"]} | {t["status"]} |'
+            separator = "|---|-------|--------|-------|--------|"
 
-        c1, c2, c3 = st.columns([0.5, 2, 2])
-        with c1:
-            st.markdown(f"**{move_num}.**")
-        with c2:
-            w_move = st.text_input(
-                f"W{move_num}", value=moves[i] if i < len(moves) else "",
-                label_visibility="collapsed", key=f"w_{move_num}",
-            )
-            if w_status:
-                st.caption(f":red[{w_status}]")
-            edited_moves.append(w_move)
-        with c3:
-            b_move = st.text_input(
-                f"B{move_num}", value=moves[i + 1] if i + 1 < len(moves) else "",
-                label_visibility="collapsed", key=f"b_{move_num}",
-            )
-            if b_status:
-                st.caption(f":red[{b_status}]")
-            edited_moves.append(b_move)
+        rows = ""
+        for i in range(0, len(moves), 2):
+            move_num = i // 2 + 1
+            w = moves[i].get("san_intent", "") if i < len(moves) and isinstance(moves[i], dict) else ""
+            b = moves[i + 1].get("san_intent", "") if i + 1 < len(moves) and isinstance(moves[i + 1], dict) else ""
+            if val_results:
+                w_res = val_results[i] if i < len(val_results) else None
+                b_res = val_results[i + 1] if i + 1 < len(val_results) else None
+                w_status = ""
+                b_status = ""
+                if w_res:
+                    if w_res["legal"]:
+                        w_status = "OK"
+                    else:
+                        w_status = f'ILLEGAL – {w_res.get("reason", "")}'
+                        if w_res.get("suggestion"):
+                            w_status += f' (suggestion: {w_res["suggestion"]})'
+                if b_res:
+                    if b_res["legal"]:
+                        b_status = "OK"
+                    else:
+                        b_status = f'ILLEGAL – {b_res.get("reason", "")}'
+                        if b_res.get("suggestion"):
+                            b_status += f' (suggestion: {b_res["suggestion"]})'
+                rows += f"| {move_num} | {w} | {w_status} | {b} | {b_status} |\n"
+            else:
+                rows += f"| {move_num} | {w} | {b} |\n"
 
-    if val_results and any(not r["legal"] for r in val_results):
-        st.error(t["some_illegal"])
+        st.markdown(f"{header}\n{separator}\n{rows}")
+
+        if val_results and any(not r["legal"] for r in val_results):
+            st.error(t["some_illegal"])
 
     # ── Action buttons ──
     col1, col2 = st.columns(2)
     with col1:
         if st.button(t["submit"], use_container_width=True):
-            clean_moves = [m for m in edited_moves if m.strip()]
+            if st.session_state.editing_moves:
+                source_moves = edited_moves
+            else:
+                source_moves = st.session_state.get("committed_moves", [
+                    m.get("san_intent", "") if isinstance(m, dict) else str(m)
+                    for m in moves
+                ])
+            clean_moves = [m for m in source_moves if m.strip()]
+            # Switch to table view to show results
+            st.session_state.editing_moves = False
 
             try:
                 val_resp = requests.post(
@@ -536,12 +592,12 @@ def show_result(data):
     with col2:
         if st.button(t["close"], use_container_width=True):
             st.session_state.validation_results = None
-            st.session_state.scoresheet_data = None
+            st.session_state.editing_moves = False
             st.rerun()
 
 
 # Handle upload
-if upload_clicked and uploaded_file is not None:
+if uploaded_file is not None:
     if uploaded_file.size > MAX_SIZE:
         st.error(t["file_too_large"])
     else:
@@ -561,10 +617,13 @@ if upload_clicked and uploaded_file is not None:
             response = requests.post(f"{API_URL}/api/scoresheets", files=files, timeout=30)
             loading.empty()
             if response.ok:
-                st.session_state.scoresheet_data = response.json()
-                st.session_state.editing_moves = True
-                st.session_state.validation_results = None
-                st.rerun()
+                data = response.json()
+                # Reset state only for a genuinely new upload
+                if st.session_state.get("_last_upload_id") != uploaded_file.file_id:
+                    st.session_state._last_upload_id = uploaded_file.file_id
+                    st.session_state.editing_moves = True
+                    st.session_state.validation_results = None
+                show_result(data)
             else:
                 st.error(f'{t["upload_failed"]} ({response.status_code})')
         except requests.ConnectionError:
@@ -573,10 +632,6 @@ if upload_clicked and uploaded_file is not None:
         except requests.RequestException as e:
             loading.empty()
             st.error(f'{t["upload_failed"]}: {e}')
-
-# Show dialog if we have scoresheet data (persists across reruns)
-if st.session_state.get("scoresheet_data"):
-    show_result(st.session_state.scoresheet_data)
 
 # Footer
 st.markdown('<div class="custom-footer">&copy; FAE 2026</div>', unsafe_allow_html=True)
