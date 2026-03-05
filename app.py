@@ -450,6 +450,12 @@ def show_result(data):
             st.markdown(f'**{t["moves_editing"]}**')
         with hdr_right:
             if st.button(t["done"], key="done_editing", use_container_width=True):
+                committed = []
+                for i in range(0, len(moves), 2):
+                    move_num = i // 2 + 1
+                    committed.append(st.session_state.get(f"w_{move_num}", ""))
+                    committed.append(st.session_state.get(f"b_{move_num}", ""))
+                st.session_state.committed_moves = committed
                 st.session_state.editing_moves = False
                 st.rerun()
 
@@ -460,14 +466,19 @@ def show_result(data):
             with c1:
                 st.markdown(f"**{move_num}.**")
             with c2:
+                # Extract san_intent from MoveDTO dict
+                w_move_dict = moves[i] if i < len(moves) else {}
+                w_move_str = w_move_dict.get("san_intent", "") if isinstance(w_move_dict, dict) else str(w_move_dict)
                 w_move = st.text_input(
-                    f"W{move_num}", value=moves[i] if i < len(moves) else "",
+                    f"W{move_num}", value=w_move_str,
                     label_visibility="collapsed", key=f"w_{move_num}",
                 )
                 edited_moves.append(w_move)
             with c3:
+                b_move_dict = moves[i + 1] if i + 1 < len(moves) else {}
+                b_move_str = b_move_dict.get("san_intent", "") if isinstance(b_move_dict, dict) else str(b_move_dict)
                 b_move = st.text_input(
-                    f"B{move_num}", value=moves[i + 1] if i + 1 < len(moves) else "",
+                    f"B{move_num}", value=b_move_str,
                     label_visibility="collapsed", key=f"b_{move_num}",
                 )
                 edited_moves.append(b_move)
@@ -492,8 +503,8 @@ def show_result(data):
         rows = ""
         for i in range(0, len(moves), 2):
             move_num = i // 2 + 1
-            w = moves[i] if i < len(moves) else ""
-            b = moves[i + 1] if i + 1 < len(moves) else ""
+            w = moves[i].get("san_intent", "") if i < len(moves) and isinstance(moves[i], dict) else ""
+            b = moves[i + 1].get("san_intent", "") if i + 1 < len(moves) and isinstance(moves[i + 1], dict) else ""
             if val_results:
                 w_res = val_results[i] if i < len(val_results) else None
                 b_res = val_results[i + 1] if i + 1 < len(val_results) else None
@@ -504,11 +515,15 @@ def show_result(data):
                         w_status = "OK"
                     else:
                         w_status = f'ILLEGAL – {w_res.get("reason", "")}'
+                        if w_res.get("suggestion"):
+                            w_status += f' (suggestion: {w_res["suggestion"]})'
                 if b_res:
                     if b_res["legal"]:
                         b_status = "OK"
                     else:
                         b_status = f'ILLEGAL – {b_res.get("reason", "")}'
+                        if b_res.get("suggestion"):
+                            b_status += f' (suggestion: {b_res["suggestion"]})'
                 rows += f"| {move_num} | {w} | {w_status} | {b} | {b_status} |\n"
             else:
                 rows += f"| {move_num} | {w} | {b} |\n"
@@ -522,7 +537,13 @@ def show_result(data):
     col1, col2 = st.columns(2)
     with col1:
         if st.button(t["submit"], use_container_width=True):
-            source_moves = edited_moves if st.session_state.editing_moves else moves
+            if st.session_state.editing_moves:
+                source_moves = edited_moves
+            else:
+                source_moves = st.session_state.get("committed_moves", [
+                    m.get("san_intent", "") if isinstance(m, dict) else str(m)
+                    for m in moves
+                ])
             clean_moves = [m for m in source_moves if m.strip()]
             # Switch to table view to show results
             st.session_state.editing_moves = False
