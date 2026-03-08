@@ -61,7 +61,7 @@ st.markdown(
 
 # Custom CSS for chess theme
 st.markdown(
-    """
+    f"""  # noqa: F541
     <style>
     .stApp {{
         min-height: 100vh;
