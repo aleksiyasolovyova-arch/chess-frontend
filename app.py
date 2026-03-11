@@ -410,11 +410,15 @@ if lang_code != st.session_state.get("_last_val_lang"):
 # Upload area — centered using columns
 _, col_center, _ = st.columns([1, 2, 1])
 with col_center:
-    uploaded_file = st.file_uploader(
+    uploaded_files = st.file_uploader(
         "Upload scoresheet",
         type=["jpg", "jpeg", "png", "webp", "pdf"],
         label_visibility="collapsed",
+        accept_multiple_files=True,
+        key="scoresheet_upload",
     )
+
+
 
 
 @st.dialog(t["result_title"], width="large")
@@ -551,7 +555,7 @@ def show_result(data):
             try:
                 val_resp = requests.post(
                     f"{API_URL}/api/validate",
-                    json={"moves": clean_moves, "lang": lang_code},
+                    json={"moves": clean_moves, "ui_lang": lang_code},
                     timeout=30,
                 )
             except requests.RequestException as e:
@@ -566,6 +570,42 @@ def show_result(data):
                     if val_data["legal"]:
                         st.session_state.validation_results = None
                         st.success(t["all_legal"])
+                    else:
+                        st.session_state.validation_results = val_data["moves"]
+                        st.error(t["some_illegal"])
+
+                    # In both cases, offer PGN export for the edited moves
+                    pgn_payload = {
+                        "white": white,
+                        "black": black,
+                        "date": date,
+                        "tournament": tournament,
+                        "moves": clean_moves,
+                    }
+
+                    try:
+                        pgn_resp = requests.post(
+                            f"{API_URL}/api/validate/pgn",
+                            json=pgn_payload,
+                            timeout=30,
+                        )
+                        if pgn_resp.ok:
+                            pgn_str = pgn_resp.text
+                            # Use st.download_button so it's clearly a button
+                            pgn_bytes = pgn_str.encode("utf-8")
+                            file_name = f"{white}_vs_{black}.pgn".replace(" ", "_") or "game.pgn"
+                            st.download_button(
+                                label="Download PGN",
+                                data=pgn_bytes,
+                                file_name=file_name,
+                                mime="application/x-chess-pgn",
+                                use_container_width=True,
+                                key="download_pgn",
+                            )
+                        else:
+                            st.error(f"PGN export failed ({pgn_resp.status_code})")
+                    except requests.RequestException as e:
+                        st.error(f"PGN export failed: {e}")
                         try:
                             resp = requests.put(
                                 f"{API_URL}/api/scoresheets/{data['filename']}",
@@ -596,42 +636,69 @@ def show_result(data):
             st.rerun()
 
 
+
 # Handle upload
-if uploaded_file is not None:
-    if uploaded_file.size > MAX_SIZE:
+if uploaded_files:
+    page1 = uploaded_files[0]
+    page2 = uploaded_files[1] if len(uploaded_files) > 1 else None
+
+    if page1.size > MAX_SIZE:
+        st.error(t["file_too_large"])
+    elif page2 and page2.size > MAX_SIZE:
         st.error(t["file_too_large"])
     else:
-        loading = st.empty()
-        loading.markdown(
-            f"""<div class="loading-overlay">
+        upload_id = (page1.file_id, page2.file_id if page2 else None)
+        is_new_upload = st.session_state.get("_last_upload_id") != upload_id
+
+        if is_new_upload:
+            # Only hit OCR on a genuinely new upload
+            loading_html = f"""
+            <div class="loading-overlay">
                 <div class="chess-loader">
                     <span></span><span></span><span></span><span></span>
                 </div>
                 <div class="loading-text">{t["processing"]}</div>
-            </div>""",
-            unsafe_allow_html=True,
-        )
-        time.sleep(2)
-        try:
-            files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
-            response = requests.post(f"{API_URL}/api/scoresheets", files=files, timeout=30)
+            </div>"""
+
+            loading = st.empty()
+            loading.markdown(loading_html, unsafe_allow_html=True)
+
+            try:
+                files = {"file": (page1.name, page1.getvalue(), page1.type)}
+                if page2:
+                    files["file2"] = (page2.name, page2.getvalue(), page2.type)
+
+                response = requests.post(
+                    f"{API_URL}/api/scoresheets",
+                    files=files,
+                    timeout=60,
+                )
+            except requests.ConnectionError:
+                loading.empty()
+                st.error(t["no_backend"])
+                st.stop()
+            except requests.RequestException as e:
+                loading.empty()
+                st.error(f'{t["upload_failed"]}: {e}')
+                st.stop()
+
             loading.empty()
-            if response.ok:
-                data = response.json()
-                # Reset state only for a genuinely new upload
-                if st.session_state.get("_last_upload_id") != uploaded_file.file_id:
-                    st.session_state._last_upload_id = uploaded_file.file_id
-                    st.session_state.editing_moves = True
-                    st.session_state.validation_results = None
-                show_result(data)
-            else:
+
+            if not response.ok:
                 st.error(f'{t["upload_failed"]} ({response.status_code})')
-        except requests.ConnectionError:
-            loading.empty()
-            st.error(t["no_backend"])
-        except requests.RequestException as e:
-            loading.empty()
-            st.error(f'{t["upload_failed"]}: {e}')
+                st.stop()
+
+            # Store result in session state so reruns don't re-trigger OCR
+            st.session_state._last_upload_id = upload_id
+            st.session_state._scoresheet_data = response.json()
+            st.session_state.editing_moves = True
+            st.session_state.validation_results = None
+
+        # Always use the stored data — even after st.rerun()
+        show_result(st.session_state._scoresheet_data)
+
+
+
 
 # Footer
 st.markdown('<div class="custom-footer">&copy; FAE 2026</div>', unsafe_allow_html=True)
