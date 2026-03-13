@@ -426,7 +426,7 @@ def show_result(data):
     if "validation_results" not in st.session_state:
         st.session_state.validation_results = None
     if "editing_moves" not in st.session_state:
-        st.session_state.editing_moves = True
+        st.session_state.editing_moves = True  # kept for backwards compat
 
     col_w, col_we, col_b, col_be = st.columns([3, 1, 3, 1])
     with col_w:
@@ -447,110 +447,150 @@ def show_result(data):
     moves = data.get("moves", [])
     val_results = st.session_state.validation_results
 
-    if st.session_state.editing_moves:
-        # ── Edit mode: text inputs for each move ──
-        hdr_left, hdr_right = st.columns([5, 1])
-        with hdr_left:
-            st.markdown(f'**{t["moves_editing"]}**')
-        with hdr_right:
-            if st.button(t["done"], key="done_editing", use_container_width=True):
-                committed = []
-                for i in range(0, len(moves), 2):
-                    move_num = i // 2 + 1
-                    committed.append(st.session_state.get(f"w_{move_num}", ""))
-                    committed.append(st.session_state.get(f"b_{move_num}", ""))
-                st.session_state.committed_moves = committed
-                st.session_state.editing_moves = False
-                st.rerun()
+    # ── Handle pending suggestion apply (must happen before widgets render) ──
+    _pending = st.session_state.pop("_pending_suggestion", None)
+    if _pending:
+        st.session_state[_pending["key"]] = _pending["value"]
+        source_moves = st.session_state.get("committed_moves", [])
+        source_moves[_pending["index"]] = _pending["value"]
+        st.session_state.committed_moves = source_moves
 
-        edited_moves = []
-        for i in range(0, len(moves), 2):
-            move_num = i // 2 + 1
-            c1, c2, c3 = st.columns([0.5, 2, 2])
-            with c1:
+    # ── Editable moves with inline validation status & suggestions ──
+    source_moves = st.session_state.get("committed_moves", [
+        m.get("san_intent", "") if isinstance(m, dict) else str(m)
+        for m in moves
+    ])
+
+    st.markdown(f'**{t["moves"]}**')
+
+    if val_results:
+        # Header row with status columns
+        c_num, c_w, c_wa, c_ws, c_b, c_ba, c_bs = st.columns([0.5, 2, 0.5, 3, 2, 0.5, 3])
+        with c_num:
+            st.markdown("**#**")
+        with c_w:
+            st.markdown(f'**{t["white"]}**')
+        with c_ws:
+            st.markdown(f'**{t["status"]}**')
+        with c_b:
+            st.markdown(f'**{t["black"]}**')
+        with c_bs:
+            st.markdown(f'**{t["status"]}**')
+    else:
+        c_num, c_w, c_b = st.columns([0.5, 2, 2])
+        with c_num:
+            st.markdown("**#**")
+        with c_w:
+            st.markdown(f'**{t["white"]}**')
+        with c_b:
+            st.markdown(f'**{t["black"]}**')
+
+    edited_moves = []
+    for i in range(0, len(moves), 2):
+        move_num = i // 2 + 1
+        w_val = source_moves[i] if i < len(source_moves) else ""
+        b_val = source_moves[i + 1] if i + 1 < len(source_moves) else ""
+
+        if val_results:
+            w_res = val_results[i] if i < len(val_results) else None
+            b_res = val_results[i + 1] if i + 1 < len(val_results) else None
+
+            c_num, c_w, c_wa, c_ws, c_b, c_ba, c_bs = st.columns([0.5, 2, 0.5, 3, 2, 0.5, 3])
+            with c_num:
                 st.markdown(f"**{move_num}.**")
-            with c2:
-                # Extract san_intent from MoveDTO dict
-                w_move_dict = moves[i] if i < len(moves) else {}
-                w_move_str = w_move_dict.get("san_intent", "") if isinstance(w_move_dict, dict) else str(w_move_dict)
+            with c_w:
                 w_move = st.text_input(
-                    f"W{move_num}", value=w_move_str,
+                    f"W{move_num}", value=w_val,
                     label_visibility="collapsed", key=f"w_{move_num}",
                 )
                 edited_moves.append(w_move)
-            with c3:
-                b_move_dict = moves[i + 1] if i + 1 < len(moves) else {}
-                b_move_str = b_move_dict.get("san_intent", "") if isinstance(b_move_dict, dict) else str(b_move_dict)
+            with c_wa:
+                if st.button(":material/check:", key=f"apply_w_{move_num}"):
+                    st.session_state.committed_moves = list(source_moves)
+                    st.session_state.committed_moves[i] = w_move
+                    st.session_state.validation_results = None
+                    st.session_state.pending_revalidate = True
+                    st.rerun()
+            with c_ws:
+                if w_res:
+                    if w_res["legal"]:
+                        st.markdown(":green[OK]")
+                    else:
+                        st.markdown(f':red[ILLEGAL – {w_res.get("reason", "")}]')
+                        if w_res.get("suggestion"):
+                            if st.button(
+                                f'Apply: {w_res["suggestion"]}',
+                                key=f"sug_w_{move_num}",
+                            ):
+                                st.session_state._pending_suggestion = {
+                                    "key": f"w_{move_num}",
+                                    "index": i,
+                                    "value": w_res["suggestion"],
+                                }
+                                st.session_state.validation_results = None
+                                st.session_state.pending_revalidate = True
+                                st.rerun()
+            with c_b:
                 b_move = st.text_input(
-                    f"B{move_num}", value=b_move_str,
+                    f"B{move_num}", value=b_val,
+                    label_visibility="collapsed", key=f"b_{move_num}",
+                )
+                edited_moves.append(b_move)
+            with c_ba:
+                if st.button(":material/check:", key=f"apply_b_{move_num}"):
+                    st.session_state.committed_moves = list(source_moves)
+                    st.session_state.committed_moves[i + 1] = b_move
+                    st.session_state.validation_results = None
+                    st.session_state.pending_revalidate = True
+                    st.rerun()
+            with c_bs:
+                if b_res:
+                    if b_res["legal"]:
+                        st.markdown(":green[OK]")
+                    else:
+                        st.markdown(f':red[ILLEGAL – {b_res.get("reason", "")}]')
+                        if b_res.get("suggestion"):
+                            if st.button(
+                                f'Apply: {b_res["suggestion"]}',
+                                key=f"sug_b_{move_num}",
+                            ):
+                                st.session_state._pending_suggestion = {
+                                    "key": f"b_{move_num}",
+                                    "index": i + 1,
+                                    "value": b_res["suggestion"],
+                                }
+                                st.session_state.validation_results = None
+                                st.session_state.pending_revalidate = True
+                                st.rerun()
+        else:
+            c_num, c_w, c_b = st.columns([0.5, 2, 2])
+            with c_num:
+                st.markdown(f"**{move_num}.**")
+            with c_w:
+                w_move = st.text_input(
+                    f"W{move_num}", value=w_val,
+                    label_visibility="collapsed", key=f"w_{move_num}",
+                )
+                edited_moves.append(w_move)
+            with c_b:
+                b_move = st.text_input(
+                    f"B{move_num}", value=b_val,
                     label_visibility="collapsed", key=f"b_{move_num}",
                 )
                 edited_moves.append(b_move)
 
-    else:
-        # ── Table mode: read-only moves with validation status ──
-        hdr_left, hdr_right = st.columns([5, 1])
-        with hdr_left:
-            st.markdown(f'**{t["moves"]}**')
-        with hdr_right:
-            if st.button(":material/edit:", key="edit_moves", use_container_width=True):
-                st.session_state.editing_moves = True
-                st.rerun()
-
-        # Build the table
-        header = f'| # | {t["white"]} | {t["black"]} |'
-        separator = "|---|-------|-------|"
-        if val_results:
-            header = f'| # | {t["white"]} | {t["status"]} | {t["black"]} | {t["status"]} |'
-            separator = "|---|-------|--------|-------|--------|"
-
-        rows = ""
-        for i in range(0, len(moves), 2):
-            move_num = i // 2 + 1
-            w = moves[i].get("san_intent", "") if i < len(moves) and isinstance(moves[i], dict) else ""
-            b = moves[i + 1].get("san_intent", "") if i + 1 < len(moves) and isinstance(moves[i + 1], dict) else ""
-            if val_results:
-                w_res = val_results[i] if i < len(val_results) else None
-                b_res = val_results[i + 1] if i + 1 < len(val_results) else None
-                w_status = ""
-                b_status = ""
-                if w_res:
-                    if w_res["legal"]:
-                        w_status = "OK"
-                    else:
-                        w_status = f'ILLEGAL – {w_res.get("reason", "")}'
-                        if w_res.get("suggestion"):
-                            w_status += f' (suggestion: {w_res["suggestion"]})'
-                if b_res:
-                    if b_res["legal"]:
-                        b_status = "OK"
-                    else:
-                        b_status = f'ILLEGAL – {b_res.get("reason", "")}'
-                        if b_res.get("suggestion"):
-                            b_status += f' (suggestion: {b_res["suggestion"]})'
-                rows += f"| {move_num} | {w} | {w_status} | {b} | {b_status} |\n"
-            else:
-                rows += f"| {move_num} | {w} | {b} |\n"
-
-        st.markdown(f"{header}\n{separator}\n{rows}")
-
-        if val_results and any(not r["legal"] for r in val_results):
-            st.error(t["some_illegal"])
+    if val_results and any(not r["legal"] for r in val_results):
+        st.error(t["some_illegal"])
 
     # ── Action buttons ──
+    # Auto-revalidate after applying a suggestion
+    should_validate = st.session_state.pop("pending_revalidate", False)
+
     col1, col2 = st.columns(2)
     with col1:
-        if st.button(t["submit"], use_container_width=True):
-            if st.session_state.editing_moves:
-                source_moves = edited_moves
-            else:
-                source_moves = st.session_state.get("committed_moves", [
-                    m.get("san_intent", "") if isinstance(m, dict) else str(m)
-                    for m in moves
-                ])
-            clean_moves = [m for m in source_moves if m.strip()]
-            # Switch to table view to show results
-            st.session_state.editing_moves = False
+        if st.button(t["submit"], use_container_width=True) or should_validate:
+            clean_moves = [m for m in edited_moves if m.strip()]
+            st.session_state.committed_moves = list(edited_moves)
 
             try:
                 val_resp = requests.post(
@@ -616,6 +656,7 @@ def show_result(data):
                                     "black_elo": black_elo,
                                     "date": date,
                                     "tournament": tournament,
+                                    "lang": lang_code,
                                     "moves": clean_moves,
                                 },
                                 timeout=30,
