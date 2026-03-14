@@ -260,21 +260,56 @@ st.markdown(
     }}
     .chess-loader {{
         display: flex;
-        gap: 8px;
+        flex-direction: column;
+        align-items: center;
+        gap: 16px;
     }}
-    .chess-loader span {{
-        width: 16px;
-        height: 16px;
-        background: #1a1a1a;
-        animation: bounce 1.4s ease-in-out infinite;
+    .chess-board-grid {{
+        display: grid;
+        grid-template-columns: repeat(3, 90px);
+        grid-template-rows: repeat(3, 90px);
+        position: relative;
+        border-radius: 6px;
+        overflow: hidden;
+        box-shadow: 0 2px 12px rgba(0,0,0,0.15);
     }}
-    .chess-loader span:nth-child(1) {{ animation-delay: 0s; }}
-    .chess-loader span:nth-child(2) {{ animation-delay: 0.2s; }}
-    .chess-loader span:nth-child(3) {{ animation-delay: 0.4s; }}
-    .chess-loader span:nth-child(4) {{ animation-delay: 0.6s; }}
-    @keyframes bounce {{
-        0%, 80%, 100% {{ transform: scaleY(0.4); opacity: 0.3; }}
-        40% {{ transform: scaleY(1); opacity: 1; }}
+    .chess-board-grid .sq {{
+        width: 90px;
+        height: 90px;
+    }}
+    .chess-board-grid .sq-light {{
+        background: #e8e4df;
+    }}
+    .chess-board-grid .sq-dark {{
+        background: #ddd9d3;
+    }}
+    .chess-board-grid .rook-walker {{
+        position: absolute;
+        width: 110px;
+        height: 110px;
+        top: -10px;
+        left: -10px;
+        object-fit: contain;
+        filter: drop-shadow(1px 2px 3px rgba(0,0,0,0.35));
+        z-index: 1;
+        animation: rook-move 14s ease-in-out infinite;
+    }}
+    /* Rook-legal moves only (horizontal or vertical, one axis per step) */
+    @keyframes rook-move {{
+        0%   {{ top: -10px; left: -10px; }}
+        8%   {{ top: -10px; left: 170px; }}
+        16%  {{ top: 170px; left: 170px; }}
+        24%  {{ top: 170px; left: 80px;  }}
+        32%  {{ top: -10px; left: 80px;  }}
+        40%  {{ top: -10px; left: -10px; }}
+        48%  {{ top: 80px;  left: -10px; }}
+        56%  {{ top: 80px;  left: 170px; }}
+        64%  {{ top: 170px; left: 170px; }}
+        72%  {{ top: 170px; left: -10px; }}
+        80%  {{ top: 80px;  left: -10px; }}
+        88%  {{ top: 80px;  left: 80px;  }}
+        96%  {{ top: -10px; left: 80px;  }}
+        100% {{ top: -10px; left: -10px; }}
     }}
 
     /* Hide default Streamlit header/footer */
@@ -461,123 +496,91 @@ def show_result(data):
         for m in moves
     ])
 
-    st.markdown(f'**{t["moves"]}**')
-
+    # ── Inject per-move border colours based on validation results ──
     if val_results:
-        # Header row with status columns
-        c_num, c_w, c_wa, c_ws, c_b, c_ba, c_bs = st.columns([0.5, 2, 0.5, 3, 2, 0.5, 3])
-        with c_num:
-            st.markdown("**#**")
-        with c_w:
-            st.markdown(f'**{t["white"]}**')
-        with c_ws:
-            st.markdown(f'**{t["status"]}**')
-        with c_b:
-            st.markdown(f'**{t["black"]}**')
-        with c_bs:
-            st.markdown(f'**{t["status"]}**')
-    else:
-        c_num, c_w, c_b = st.columns([0.5, 2, 2])
-        with c_num:
-            st.markdown("**#**")
-        with c_w:
-            st.markdown(f'**{t["white"]}**')
-        with c_b:
-            st.markdown(f'**{t["black"]}**')
+        border_css_parts = []
+        for idx, vr in enumerate(val_results):
+            move_num = idx // 2 + 1
+            prefix = "w" if idx % 2 == 0 else "b"
+            color = "#2e7d32" if vr["legal"] else "#c62828"
+            border_css_parts.append(
+                f'.st-key-{prefix}_{move_num} input '
+                f'{{ border: 2px solid {color} !important; border-radius: 6px; }}'
+            )
+        st.markdown(
+            "<style>" + " ".join(border_css_parts) + "</style>",
+            unsafe_allow_html=True,
+        )
 
+    # ── Header ──
+    st.markdown(f'**{t["moves"]}**')
+    c_num, c_w, c_b = st.columns([0.5, 2, 2])
+    with c_num:
+        st.markdown("**#**")
+    with c_w:
+        st.markdown(f'**{t["white"]}**')
+    with c_b:
+        st.markdown(f'**{t["black"]}**')
+
+    # ── Move rows ──
     edited_moves = []
     for i in range(0, len(moves), 2):
         move_num = i // 2 + 1
         w_val = source_moves[i] if i < len(source_moves) else ""
         b_val = source_moves[i + 1] if i + 1 < len(source_moves) else ""
 
-        if val_results:
-            w_res = val_results[i] if i < len(val_results) else None
-            b_res = val_results[i + 1] if i + 1 < len(val_results) else None
+        w_res = val_results[i] if val_results and i < len(val_results) else None
+        b_res = val_results[i + 1] if val_results and i + 1 < len(val_results) else None
 
-            c_num, c_w, c_wa, c_ws, c_b, c_ba, c_bs = st.columns([0.5, 2, 0.5, 3, 2, 0.5, 3])
-            with c_num:
-                st.markdown(f"**{move_num}.**")
-            with c_w:
-                w_move = st.text_input(
-                    f"W{move_num}", value=w_val,
-                    label_visibility="collapsed", key=f"w_{move_num}",
-                )
-                edited_moves.append(w_move)
-            with c_wa:
-                if st.button(":material/check:", key=f"apply_w_{move_num}"):
-                    st.session_state.committed_moves = list(source_moves)
-                    st.session_state.committed_moves[i] = w_move
-                    st.session_state.validation_results = None
-                    st.session_state.pending_revalidate = True
-                    st.rerun()
-            with c_ws:
-                if w_res:
-                    if w_res["legal"]:
-                        st.markdown(":green[OK]")
-                    else:
-                        st.markdown(f':red[ILLEGAL – {w_res.get("reason", "")}]')
-                        if w_res.get("suggestion"):
-                            if st.button(
-                                f'Apply: {w_res["suggestion"]}',
-                                key=f"sug_w_{move_num}",
-                            ):
-                                st.session_state._pending_suggestion = {
-                                    "key": f"w_{move_num}",
-                                    "index": i,
-                                    "value": w_res["suggestion"],
-                                }
-                                st.session_state.validation_results = None
-                                st.session_state.pending_revalidate = True
-                                st.rerun()
-            with c_b:
-                b_move = st.text_input(
-                    f"B{move_num}", value=b_val,
-                    label_visibility="collapsed", key=f"b_{move_num}",
-                )
-                edited_moves.append(b_move)
-            with c_ba:
-                if st.button(":material/check:", key=f"apply_b_{move_num}"):
-                    st.session_state.committed_moves = list(source_moves)
-                    st.session_state.committed_moves[i + 1] = b_move
-                    st.session_state.validation_results = None
-                    st.session_state.pending_revalidate = True
-                    st.rerun()
-            with c_bs:
-                if b_res:
-                    if b_res["legal"]:
-                        st.markdown(":green[OK]")
-                    else:
-                        st.markdown(f':red[ILLEGAL – {b_res.get("reason", "")}]')
-                        if b_res.get("suggestion"):
-                            if st.button(
-                                f'Apply: {b_res["suggestion"]}',
-                                key=f"sug_b_{move_num}",
-                            ):
-                                st.session_state._pending_suggestion = {
-                                    "key": f"b_{move_num}",
-                                    "index": i + 1,
-                                    "value": b_res["suggestion"],
-                                }
-                                st.session_state.validation_results = None
-                                st.session_state.pending_revalidate = True
-                                st.rerun()
-        else:
-            c_num, c_w, c_b = st.columns([0.5, 2, 2])
-            with c_num:
-                st.markdown(f"**{move_num}.**")
-            with c_w:
-                w_move = st.text_input(
-                    f"W{move_num}", value=w_val,
-                    label_visibility="collapsed", key=f"w_{move_num}",
-                )
-                edited_moves.append(w_move)
-            with c_b:
-                b_move = st.text_input(
-                    f"B{move_num}", value=b_val,
-                    label_visibility="collapsed", key=f"b_{move_num}",
-                )
-                edited_moves.append(b_move)
+        c_num, c_w, c_b = st.columns([0.5, 2, 2])
+        with c_num:
+            st.markdown(f"**{move_num}.**")
+        with c_w:
+            w_move = st.text_input(
+                f"W{move_num}", value=w_val,
+                label_visibility="collapsed", key=f"w_{move_num}",
+            )
+            edited_moves.append(w_move)
+            if w_res and not w_res["legal"]:
+                st.caption(f':red[{w_res.get("reason", "")}]')
+                if w_res.get("suggestion"):
+                    if st.button(
+                        f'Apply: {w_res["suggestion"]}',
+                        key=f"sug_w_{move_num}",
+                    ):
+                        st.session_state._pending_suggestion = {
+                            "key": f"w_{move_num}",
+                            "index": i,
+                            "value": w_res["suggestion"],
+                        }
+                        # Optimistically mark as legal so borders stay smooth
+                        val_results[i] = {"legal": True}
+                        st.session_state.validation_results = val_results
+                        st.session_state.pending_revalidate = True
+                        st.rerun()
+        with c_b:
+            b_move = st.text_input(
+                f"B{move_num}", value=b_val,
+                label_visibility="collapsed", key=f"b_{move_num}",
+            )
+            edited_moves.append(b_move)
+            if b_res and not b_res["legal"]:
+                st.caption(f':red[{b_res.get("reason", "")}]')
+                if b_res.get("suggestion"):
+                    if st.button(
+                        f'Apply: {b_res["suggestion"]}',
+                        key=f"sug_b_{move_num}",
+                    ):
+                        st.session_state._pending_suggestion = {
+                            "key": f"b_{move_num}",
+                            "index": i + 1,
+                            "value": b_res["suggestion"],
+                        }
+                        # Optimistically mark as legal so borders stay smooth
+                        val_results[i + 1] = {"legal": True}
+                        st.session_state.validation_results = val_results
+                        st.session_state.pending_revalidate = True
+                        st.rerun()
 
     if val_results and any(not r["legal"] for r in val_results):
         st.error(t["some_illegal"])
@@ -669,7 +672,12 @@ def show_result(data):
                             st.error(f'{t["save_failed"]}: {e}')
                     else:
                         st.session_state.validation_results = val_data["moves"]
-                        st.rerun()
+                        if should_validate:
+                            # Auto-revalidation after suggestion — rerun once
+                            # to show updated borders without a second flash
+                            st.rerun()
+                        else:
+                            st.rerun()
     with col2:
         if st.button(t["close"], use_container_width=True):
             st.session_state.validation_results = None
@@ -696,7 +704,20 @@ if uploaded_files:
             loading_html = f"""
             <div class="loading-overlay">
                 <div class="chess-loader">
-                    <span></span><span></span><span></span><span></span>
+                    <div class="chess-board-grid">
+                        <div class="sq sq-light"></div>
+                        <div class="sq sq-dark"></div>
+                        <div class="sq sq-light"></div>
+                        <div class="sq sq-dark"></div>
+                        <div class="sq sq-light"></div>
+                        <div class="sq sq-dark"></div>
+                        <div class="sq sq-light"></div>
+                        <div class="sq sq-dark"></div>
+                        <div class="sq sq-light"></div>
+                        <img class="rook-walker"
+                             src="data:image/png;base64,{_logo_rook_b64}"
+                             alt="Loading...">
+                    </div>
                 </div>
                 <div class="loading-text">{t["processing"]}</div>
             </div>"""
