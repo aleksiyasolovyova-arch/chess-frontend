@@ -348,6 +348,12 @@ T = {
         "processing": "Processing scoresheet...",
         "upload_failed": "Upload failed",
         "no_backend": "Cannot connect to backend. Is FastAPI running on localhost:8000?",
+        "download_pgn": "Download PGN",
+        "result": "Result",
+        "white_wins": "White wins (1-0)",
+        "black_wins": "Black wins (0-1)",
+        "draw": "Draw (½-½)",
+        "unknown": "Unknown (*)",
     },
     "nl": {
         "scoresheet_upload": "Scoreblad Uploaden",
@@ -373,6 +379,12 @@ T = {
         "processing": "Scoreblad verwerken...",
         "upload_failed": "Uploaden mislukt",
         "no_backend": "Kan geen verbinding maken met de backend. Draait FastAPI op localhost:8000?",
+        "download_pgn": "Download PGN",
+        "result": "Resultaat",
+        "white_wins": "Wit wint (1-0)",
+        "black_wins": "Zwart wint (0-1)",
+        "draw": "Remise (½-½)",
+        "unknown": "Onbekend (*)",
     },
     "fr": {
         "scoresheet_upload": "T\u00e9l\u00e9charger la feuille",
@@ -398,6 +410,12 @@ T = {
         "processing": "Traitement de la feuille de match...",
         "upload_failed": "\u00c9chec du t\u00e9l\u00e9chargement",
         "no_backend": "Impossible de se connecter au backend. FastAPI tourne-t-il sur localhost:8000 ?",
+        "download_pgn": "Télécharger PGN",
+        "result": "Résultat",
+        "white_wins": "Blancs gagnent (1-0)",
+        "black_wins": "Noirs gagnent (0-1)",
+        "draw": "Nulle (½-½)",
+        "unknown": "Inconnu (*)",
     },
 }
 
@@ -473,11 +491,25 @@ def show_result(data):
     with col_be:
         black_elo = st.number_input(t["elo"], value=data.get("black_elo", 0), min_value=0, step=1, key="black_elo")
 
-    col_d, col_t = st.columns(2)
+    col_d, col_t, col_r = st.columns([2, 2, 1])
     with col_d:
         date = st.text_input(t["date"], value=data.get("date", ""))
     with col_t:
         tournament = st.text_input(t["tournament"], value=data.get("tournament", ""))
+    with col_r:
+        RESULT_OPTIONS = {
+            t["white_wins"]: "1-0",
+            t["black_wins"]: "0-1",
+            t["draw"]: "1/2-1/2",
+            t["unknown"]: "*",
+        }
+        result_label = st.selectbox(
+            t["result"],
+            options=list(RESULT_OPTIONS.keys()),
+            index=list(RESULT_OPTIONS.values()).index(data.get("result") or  "*"),
+            key="result",
+        )
+        result = RESULT_OPTIONS[result_label]
 
     moves = data.get("moves", [])
     val_results = st.session_state.validation_results
@@ -572,11 +604,13 @@ def show_result(data):
                         val_results[i] = {"legal": True}
                         st.session_state.validation_results = val_results
                         st.session_state.pending_revalidate = True
+                        st.session_state.pending_pgn_refresh = True
                         st.rerun()
         with c_we:
             if st.button(":material/arrow_forward:", key=f"edit_w_{move_num}", help=f"Apply edit for white move {move_num}"):
                 st.session_state.committed_moves[i] = w_move
                 st.session_state.pending_revalidate = True
+                st.session_state.pending_pgn_refresh = True
                 st.rerun()
         with c_b:
             b_move = st.text_input(
@@ -595,16 +629,56 @@ def show_result(data):
                         val_results[i + 1] = {"legal": True}
                         st.session_state.validation_results = val_results
                         st.session_state.pending_revalidate = True
+                        st.session_state.pending_pgn_refresh = True
                         st.rerun()
         with c_be:
             if i + 1 < len(source_moves):
                 if st.button(":material/arrow_forward:", key=f"edit_b_{move_num}", help=f"Apply edit for black move {move_num}"):
                     st.session_state.committed_moves[i + 1] = b_move
                     st.session_state.pending_revalidate = True
+                    st.session_state.pending_pgn_refresh = True
                     st.rerun()
 
     if val_results and any(not r["legal"] for r in val_results):
         st.error(t["some_illegal"])
+
+    # ── Auto-refresh PGN whenever a move is committed ──
+    if st.session_state.pop("pending_pgn_refresh", False):
+        clean = [m for m in st.session_state.committed_moves if m.strip()]
+        try:
+            pgn_resp = requests.post(
+                f"{API_URL}/api/validate/pgn",
+                json={
+                    "white": white,
+                    "black": black,
+                    "date": date,
+                    "tournament": tournament,
+                    "result": result,
+                    "moves": clean,
+                },
+                timeout=30,
+            )
+            if pgn_resp.ok:
+                file_name = (
+                    f"{white}_vs_{black}.pgn".replace(" ", "_") or "game.pgn"
+                )
+                st.session_state.pgn_bytes = pgn_resp.text.encode("utf-8")
+                st.session_state.pgn_filename = file_name
+        except requests.RequestException:
+            pass
+
+    st.divider()
+
+    # ── Persistent Download PGN button (shown whenever PGN is available) ──
+    if st.session_state.get("pgn_bytes"):
+        st.download_button(
+            label=t["download_pgn"],
+            data=st.session_state.pgn_bytes,
+            file_name=st.session_state.get("pgn_filename", "game.pgn"),
+            mime="application/x-chess-pgn",
+            use_container_width=True,
+            key="download_pgn",
+        )
 
     # ── Action buttons ──
     col1, col2 = st.columns(2)
@@ -613,6 +687,7 @@ def show_result(data):
             clean_moves = [m for m in edited_moves if m.strip()]
             st.session_state.committed_moves = list(edited_moves)
 
+            # Step 1: validate
             try:
                 val_resp = requests.post(
                     f"{API_URL}/api/validate",
@@ -635,15 +710,16 @@ def show_result(data):
                         st.session_state.validation_results = val_data["moves"]
                         st.error(t["some_illegal"])
 
-                    # In both cases, offer PGN export for the edited moves
+                    # Step 2: fetch PGN and store in session state so the
+                    # download button persists across reruns
                     pgn_payload = {
                         "white": white,
                         "black": black,
                         "date": date,
                         "tournament": tournament,
+                        "result": result,
                         "moves": clean_moves,
                     }
-
                     try:
                         pgn_resp = requests.post(
                             f"{API_URL}/api/validate/pgn",
@@ -651,50 +727,48 @@ def show_result(data):
                             timeout=30,
                         )
                         if pgn_resp.ok:
-                            pgn_str = pgn_resp.text
-                            # Use st.download_button so it's clearly a button
-                            pgn_bytes = pgn_str.encode("utf-8")
-                            file_name = f"{white}_vs_{black}.pgn".replace(" ", "_") or "game.pgn"
-                            st.download_button(
-                                label="Download PGN",
-                                data=pgn_bytes,
-                                file_name=file_name,
-                                mime="application/x-chess-pgn",
-                                use_container_width=True,
-                                key="download_pgn",
+                            file_name = (
+                                f"{white}_vs_{black}.pgn".replace(" ", "_")
+                                or "game.pgn"
                             )
+                            st.session_state.pgn_bytes = pgn_resp.text.encode("utf-8")
+                            st.session_state.pgn_filename = file_name
                         else:
                             st.error(f"PGN export failed ({pgn_resp.status_code})")
                     except requests.RequestException as e:
                         st.error(f"PGN export failed: {e}")
-                        try:
-                            resp = requests.put(
-                                f"{API_URL}/api/scoresheets/{data['filename']}",
-                                json={
-                                    "white": white,
-                                    "white_elo": white_elo,
-                                    "black": black,
-                                    "black_elo": black_elo,
-                                    "date": date,
-                                    "tournament": tournament,
-                                    "lang": lang_code,
-                                    "moves": clean_moves,
-                                },
-                                timeout=30,
-                            )
-                            if resp.ok:
-                                st.success(t["saved"])
-                            else:
-                                st.error(f'{t["save_failed"]} ({resp.status_code})')
-                        except requests.RequestException as e:
-                            st.error(f'{t["save_failed"]}: {e}')
-                    else:
-                        st.session_state.validation_results = val_data["moves"]
-                        st.rerun()
+
+                    # Step 3: persist the scoresheet record
+                    try:
+                        resp = requests.put(
+                            f"{API_URL}/api/scoresheets/{data['filename']}",
+                            json={
+                                "white": white,
+                                "white_elo": white_elo,
+                                "black": black,
+                                "black_elo": black_elo,
+                                "date": date,
+                                "tournament": tournament,
+                                "lang": lang_code,
+                                "moves": clean_moves,
+                            },
+                            timeout=30,
+                        )
+                        if resp.ok:
+                            st.success(t["saved"])
+                        else:
+                            st.error(f'{t["save_failed"]} ({resp.status_code})')
+                    except requests.RequestException as e:
+                        st.error(f'{t["save_failed"]}: {e}')
+
+                    st.rerun()
+
     with col2:
         if st.button(t["close"], use_container_width=True):
             st.session_state.validation_results = None
             st.session_state.editing_moves = False
+            st.session_state.pgn_bytes = None
+            st.session_state.pgn_filename = None
             st.rerun()
 
 
@@ -768,6 +842,9 @@ if uploaded_files:
             st.session_state._scoresheet_data = response.json()
             st.session_state.editing_moves = True
             st.session_state.validation_results = None
+            # Clear any PGN from a previous scoresheet
+            st.session_state.pgn_bytes = None
+            st.session_state.pgn_filename = None
 
         # Always use the stored data — even after st.rerun()
         show_result(st.session_state._scoresheet_data)
