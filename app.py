@@ -482,19 +482,39 @@ def show_result(data):
     moves = data.get("moves", [])
     val_results = st.session_state.validation_results
 
-    # ── Handle pending suggestion apply (must happen before widgets render) ──
-    _pending = st.session_state.pop("_pending_suggestion", None)
-    if _pending:
-        st.session_state[_pending["key"]] = _pending["value"]
-        source_moves = st.session_state.get("committed_moves", [])
-        source_moves[_pending["index"]] = _pending["value"]
-        st.session_state.committed_moves = source_moves
-
     # ── Editable moves with inline validation status & suggestions ──
     source_moves = st.session_state.get("committed_moves", [
         m.get("san_intent", "") if isinstance(m, dict) else str(m)
         for m in moves
     ])
+    st.session_state.committed_moves = source_moves
+
+    # ── Auto-revalidate after applying a suggestion or edit ──
+    if st.session_state.pop("pending_revalidate", False):
+        clean = [m for m in source_moves if m.strip()]
+        try:
+            vr = requests.post(
+                f"{API_URL}/api/validate",
+                json={"moves": clean, "ui_lang": lang_code},
+                timeout=30,
+            )
+            if vr.ok:
+                vd = vr.json()
+                val_results = vd["moves"] if not vd["legal"] else None
+                st.session_state.validation_results = val_results
+        except requests.RequestException:
+            pass
+
+    # ── Hide "Press Enter to apply" tooltip & align edit buttons with inputs ──
+    st.markdown(
+        "<style>"
+        "div[data-testid='InputInstructions'] { display: none; }"
+        " div[data-testid='stVerticalBlock'] div[data-testid='stHorizontalBlock'] {"
+        "   align-items: center;"
+        " }"
+        "</style>",
+        unsafe_allow_html=True,
+    )
 
     # ── Inject per-move border colours based on validation results ──
     if val_results:
@@ -514,7 +534,7 @@ def show_result(data):
 
     # ── Header ──
     st.markdown(f'**{t["moves"]}**')
-    c_num, c_w, c_b = st.columns([0.5, 2, 2])
+    c_num, c_w, c_we, c_b, c_be = st.columns([0.5, 2, 0.3, 2, 0.3])
     with c_num:
         st.markdown("**#**")
     with c_w:
@@ -532,7 +552,7 @@ def show_result(data):
         w_res = val_results[i] if val_results and i < len(val_results) else None
         b_res = val_results[i + 1] if val_results and i + 1 < len(val_results) else None
 
-        c_num, c_w, c_b = st.columns([0.5, 2, 2])
+        c_num, c_w, c_we, c_b, c_be = st.columns([0.5, 2, 0.3, 2, 0.3])
         with c_num:
             st.markdown(f"**{move_num}.**")
         with c_w:
@@ -548,16 +568,16 @@ def show_result(data):
                         f'Apply: {w_res["suggestion"]}',
                         key=f"sug_w_{move_num}",
                     ):
-                        st.session_state._pending_suggestion = {
-                            "key": f"w_{move_num}",
-                            "index": i,
-                            "value": w_res["suggestion"],
-                        }
-                        # Optimistically mark as legal so borders stay smooth
+                        st.session_state.committed_moves[i] = w_res["suggestion"]
                         val_results[i] = {"legal": True}
                         st.session_state.validation_results = val_results
                         st.session_state.pending_revalidate = True
                         st.rerun()
+        with c_we:
+            if st.button(":material/arrow_forward:", key=f"edit_w_{move_num}", help=f"Apply edit for white move {move_num}"):
+                st.session_state.committed_moves[i] = w_move
+                st.session_state.pending_revalidate = True
+                st.rerun()
         with c_b:
             b_move = st.text_input(
                 f"B{move_num}", value=b_val,
@@ -571,27 +591,25 @@ def show_result(data):
                         f'Apply: {b_res["suggestion"]}',
                         key=f"sug_b_{move_num}",
                     ):
-                        st.session_state._pending_suggestion = {
-                            "key": f"b_{move_num}",
-                            "index": i + 1,
-                            "value": b_res["suggestion"],
-                        }
-                        # Optimistically mark as legal so borders stay smooth
+                        st.session_state.committed_moves[i + 1] = b_res["suggestion"]
                         val_results[i + 1] = {"legal": True}
                         st.session_state.validation_results = val_results
                         st.session_state.pending_revalidate = True
                         st.rerun()
+        with c_be:
+            if i + 1 < len(source_moves):
+                if st.button(":material/arrow_forward:", key=f"edit_b_{move_num}", help=f"Apply edit for black move {move_num}"):
+                    st.session_state.committed_moves[i + 1] = b_move
+                    st.session_state.pending_revalidate = True
+                    st.rerun()
 
     if val_results and any(not r["legal"] for r in val_results):
         st.error(t["some_illegal"])
 
     # ── Action buttons ──
-    # Auto-revalidate after applying a suggestion
-    should_validate = st.session_state.pop("pending_revalidate", False)
-
     col1, col2 = st.columns(2)
     with col1:
-        if st.button(t["submit"], use_container_width=True) or should_validate:
+        if st.button(t["submit"], use_container_width=True):
             clean_moves = [m for m in edited_moves if m.strip()]
             st.session_state.committed_moves = list(edited_moves)
 
@@ -672,12 +690,7 @@ def show_result(data):
                             st.error(f'{t["save_failed"]}: {e}')
                     else:
                         st.session_state.validation_results = val_data["moves"]
-                        if should_validate:
-                            # Auto-revalidation after suggestion — rerun once
-                            # to show updated borders without a second flash
-                            st.rerun()
-                        else:
-                            st.rerun()
+                        st.rerun()
     with col2:
         if st.button(t["close"], use_container_width=True):
             st.session_state.validation_results = None
