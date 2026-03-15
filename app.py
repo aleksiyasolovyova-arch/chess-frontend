@@ -537,19 +537,21 @@ def show_result(data):
         except requests.RequestException:
             pass
 
-    # ── Hide "Press Enter to apply" tooltip & align edit buttons with inputs ──
-    st.markdown(
-        "<style>"
-        "div[data-testid='InputInstructions'] { display: none; }"
-        " div[data-testid='stVerticalBlock'] div[data-testid='stHorizontalBlock'] {"
-        "   align-items: center;"
-        " }"
-        "</style>",
-        unsafe_allow_html=True,
-    )
+    # ── Only show moves after validation ──
+    edited_moves = list(source_moves)
+    if val_results is not None:
+        # ── Hide "Press Enter to apply" tooltip & align edit buttons with inputs ──
+        st.markdown(
+            "<style>"
+            "div[data-testid='InputInstructions'] { display: none; }"
+            " div[data-testid='stVerticalBlock'] div[data-testid='stHorizontalBlock'] {"
+            "   align-items: center;"
+            " }"
+            "</style>",
+            unsafe_allow_html=True,
+        )
 
-    # ── Inject per-move border colours based on validation results ──
-    if val_results:
+        # ── Inject per-move border colours based on validation results ──
         border_css_parts = []
         for idx, vr in enumerate(val_results):
             move_num = idx // 2 + 1
@@ -564,83 +566,81 @@ def show_result(data):
             unsafe_allow_html=True,
         )
 
-    # ── Header ──
-    st.markdown(f'**{t["moves"]}**')
-    c_num, c_w, c_we, c_b, c_be = st.columns([0.5, 2, 0.3, 2, 0.3])
-    with c_num:
-        st.markdown("**#**")
-    with c_w:
-        st.markdown(f'**{t["white"]}**')
-    with c_b:
-        st.markdown(f'**{t["black"]}**')
-
-    # ── Move rows ──
-    edited_moves = []
-    for i in range(0, len(moves), 2):
-        move_num = i // 2 + 1
-        w_val = source_moves[i] if i < len(source_moves) else ""
-        b_val = source_moves[i + 1] if i + 1 < len(source_moves) else ""
-
-        w_res = val_results[i] if val_results and i < len(val_results) else None
-        b_res = val_results[i + 1] if val_results and i + 1 < len(val_results) else None
-
+        # ── Header ──
+        st.markdown(f'**{t["moves"]}**')
         c_num, c_w, c_we, c_b, c_be = st.columns([0.5, 2, 0.3, 2, 0.3])
         with c_num:
-            st.markdown(f"**{move_num}.**")
+            st.markdown("**#**")
         with c_w:
-            w_move = st.text_input(
-                f"W{move_num}", value=w_val,
-                label_visibility="collapsed", key=f"w_{move_num}",
-            )
-            edited_moves.append(w_move)
-            if w_res and not w_res["legal"]:
-                st.caption(f':red[{w_res.get("reason", "")}]')
-                if w_res.get("suggestion"):
-                    if st.button(
-                        f'Apply: {w_res["suggestion"]}',
-                        key=f"sug_w_{move_num}",
-                    ):
-                        st.session_state.committed_moves[i] = w_res["suggestion"]
-                        val_results[i] = {"legal": True}
-                        st.session_state.validation_results = val_results
-                        st.session_state.pending_revalidate = True
-                        st.session_state.pending_pgn_refresh = True
-                        st.rerun()
-        with c_we:
-            if st.button(":material/arrow_forward:", key=f"edit_w_{move_num}", help=f"Apply edit for white move {move_num}"):
-                st.session_state.committed_moves[i] = w_move
-                st.session_state.pending_revalidate = True
-                st.session_state.pending_pgn_refresh = True
-                st.rerun()
+            st.markdown(f'**{t["white"]}**')
         with c_b:
-            b_move = st.text_input(
-                f"B{move_num}", value=b_val,
-                label_visibility="collapsed", key=f"b_{move_num}",
-            )
-            edited_moves.append(b_move)
-            if b_res and not b_res["legal"]:
-                st.caption(f':red[{b_res.get("reason", "")}]')
-                if b_res.get("suggestion"):
-                    if st.button(
-                        f'Apply: {b_res["suggestion"]}',
-                        key=f"sug_b_{move_num}",
-                    ):
-                        st.session_state.committed_moves[i + 1] = b_res["suggestion"]
-                        val_results[i + 1] = {"legal": True}
-                        st.session_state.validation_results = val_results
-                        st.session_state.pending_revalidate = True
-                        st.session_state.pending_pgn_refresh = True
-                        st.rerun()
-        with c_be:
-            if i + 1 < len(source_moves):
-                if st.button(":material/arrow_forward:", key=f"edit_b_{move_num}", help=f"Apply edit for black move {move_num}"):
-                    st.session_state.committed_moves[i + 1] = b_move
+            st.markdown(f'**{t["black"]}**')
+
+        # ── Move rows ──
+        edited_moves = []
+        for i in range(0, len(moves), 2):
+            move_num = i // 2 + 1
+            w_val = source_moves[i] if i < len(source_moves) else ""
+            b_val = source_moves[i + 1] if i + 1 < len(source_moves) else ""
+
+            w_res = val_results[i] if i < len(val_results) else None
+            b_res = val_results[i + 1] if i + 1 < len(val_results) else None
+
+            c_num, c_w, c_we, c_b, c_be = st.columns([0.5, 2, 0.3, 2, 0.3])
+            with c_num:
+                st.markdown(f"**{move_num}.**")
+            with c_w:
+                w_move = st.text_input(
+                    f"W{move_num}", value=w_val,
+                    label_visibility="collapsed", key=f"w_{move_num}",
+                )
+                edited_moves.append(w_move)
+                if w_res and not w_res["legal"]:
+                    st.caption(f':red[{w_res.get("reason", "")}]')
+                    if w_res.get("suggestion"):
+                        if st.button(
+                            f'Apply: {w_res["suggestion"]}',
+                            key=f"sug_w_{move_num}",
+                        ):
+                            st.session_state.committed_moves[i] = w_res["suggestion"]
+                            val_results[i] = {"legal": True}
+                            st.session_state.validation_results = val_results
+                            st.session_state.pending_revalidate = True
+                            st.session_state.pending_pgn_refresh = True
+                            st.rerun()
+            with c_we:
+                if st.button(":material/arrow_forward:", key=f"edit_w_{move_num}", help=f"Apply edit for white move {move_num}"):
+                    st.session_state.committed_moves[i] = w_move
                     st.session_state.pending_revalidate = True
                     st.session_state.pending_pgn_refresh = True
                     st.rerun()
+            with c_b:
+                b_move = st.text_input(
+                    f"B{move_num}", value=b_val,
+                    label_visibility="collapsed", key=f"b_{move_num}",
+                )
+                edited_moves.append(b_move)
+                if b_res and not b_res["legal"]:
+                    st.caption(f':red[{b_res.get("reason", "")}]')
+                    if b_res.get("suggestion"):
+                        if st.button(
+                            f'Apply: {b_res["suggestion"]}',
+                            key=f"sug_b_{move_num}",
+                        ):
+                            st.session_state.committed_moves[i + 1] = b_res["suggestion"]
+                            val_results[i + 1] = {"legal": True}
+                            st.session_state.validation_results = val_results
+                            st.session_state.pending_revalidate = True
+                            st.session_state.pending_pgn_refresh = True
+                            st.rerun()
+            with c_be:
+                if i + 1 < len(source_moves):
+                    if st.button(":material/arrow_forward:", key=f"edit_b_{move_num}", help=f"Apply edit for black move {move_num}"):
+                        st.session_state.committed_moves[i + 1] = b_move
+                        st.session_state.pending_revalidate = True
+                        st.session_state.pending_pgn_refresh = True
+                        st.rerun()
 
-    if val_results and any(not r["legal"] for r in val_results):
-        st.error(t["some_illegal"])
 
     # ── Auto-refresh PGN whenever a move is committed ──
     if st.session_state.pop("pending_pgn_refresh", False):
@@ -708,7 +708,6 @@ def show_result(data):
                         st.success(t["all_legal"])
                     else:
                         st.session_state.validation_results = val_data["moves"]
-                        st.error(t["some_illegal"])
 
                     # Step 2: fetch PGN and store in session state so the
                     # download button persists across reruns
@@ -737,29 +736,6 @@ def show_result(data):
                             st.error(f"PGN export failed ({pgn_resp.status_code})")
                     except requests.RequestException as e:
                         st.error(f"PGN export failed: {e}")
-
-                    # Step 3: persist the scoresheet record
-                    try:
-                        resp = requests.put(
-                            f"{API_URL}/api/scoresheets/{data['filename']}",
-                            json={
-                                "white": white,
-                                "white_elo": white_elo,
-                                "black": black,
-                                "black_elo": black_elo,
-                                "date": date,
-                                "tournament": tournament,
-                                "lang": lang_code,
-                                "moves": clean_moves,
-                            },
-                            timeout=30,
-                        )
-                        if resp.ok:
-                            st.success(t["saved"])
-                        else:
-                            st.error(f'{t["save_failed"]} ({resp.status_code})')
-                    except requests.RequestException as e:
-                        st.error(f'{t["save_failed"]}: {e}')
 
                     st.rerun()
 
