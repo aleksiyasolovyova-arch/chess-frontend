@@ -61,7 +61,7 @@ st.markdown(
 
 # Custom CSS for chess theme
 st.markdown(
-    f"""  # noqa: F541
+    f"""
     <style>
     .stApp {{
         min-height: 100vh;
@@ -479,7 +479,7 @@ def show_result(data):
     if "validation_results" not in st.session_state:
         st.session_state.validation_results = None
     if "editing_moves" not in st.session_state:
-        st.session_state.editing_moves = True  # kept for backwards compat
+        st.session_state.editing_moves = True
 
     col_w, col_we, col_b, col_be = st.columns([3, 1, 3, 1])
     with col_w:
@@ -506,7 +506,7 @@ def show_result(data):
         result_label = st.selectbox(
             t["result"],
             options=list(RESULT_OPTIONS.keys()),
-            index=list(RESULT_OPTIONS.values()).index(data.get("result") or  "*"),
+            index=list(RESULT_OPTIONS.values()).index(data.get("result") or "*"),
             key="result",
         )
         result = RESULT_OPTIONS[result_label]
@@ -514,12 +514,20 @@ def show_result(data):
     moves = data.get("moves", [])
     val_results = st.session_state.validation_results
 
-    # ── Editable moves with inline validation status & suggestions ──
     source_moves = st.session_state.get("committed_moves", [
         m.get("san_intent", "") if isinstance(m, dict) else str(m)
         for m in moves
     ])
     st.session_state.committed_moves = source_moves
+
+    # ── Apply any pending suggestions before widgets are instantiated ──
+    for key in [k for k in st.session_state if k.startswith("pending_apply_")]:
+        idx = int(key.replace("pending_apply_", ""))
+        st.session_state.committed_moves[idx] = st.session_state.pop(key)
+        st.session_state["move_widget_gen"] = st.session_state.get("move_widget_gen", 0) + 1
+    source_moves = st.session_state.committed_moves
+
+    gen = st.session_state.get("move_widget_gen", 0)
 
     # ── Auto-revalidate after applying a suggestion or edit ──
     if st.session_state.pop("pending_revalidate", False):
@@ -540,7 +548,6 @@ def show_result(data):
     # ── Only show moves after validation ──
     edited_moves = list(source_moves)
     if val_results is not None:
-        # ── Hide "Press Enter to apply" tooltip & align edit buttons with inputs ──
         st.markdown(
             "<style>"
             "div[data-testid='InputInstructions'] { display: none; }"
@@ -551,14 +558,13 @@ def show_result(data):
             unsafe_allow_html=True,
         )
 
-        # ── Inject per-move border colours based on validation results ──
         border_css_parts = []
         for idx, vr in enumerate(val_results):
             move_num = idx // 2 + 1
             prefix = "w" if idx % 2 == 0 else "b"
             color = "#2e7d32" if vr["legal"] else "#c62828"
             border_css_parts.append(
-                f'.st-key-{prefix}_{move_num} input '
+                f'.st-key-{prefix}_{move_num}_g{gen} input '
                 f'{{ border: 2px solid {color} !important; border-radius: 6px; }}'
             )
         st.markdown(
@@ -566,7 +572,6 @@ def show_result(data):
             unsafe_allow_html=True,
         )
 
-        # ── Header ──
         st.markdown(f'**{t["moves"]}**')
         c_num, c_w, c_we, c_b, c_be = st.columns([0.5, 2, 0.3, 2, 0.3])
         with c_num:
@@ -576,7 +581,6 @@ def show_result(data):
         with c_b:
             st.markdown(f'**{t["black"]}**')
 
-        # ── Move rows ──
         edited_moves = []
         for i in range(0, len(moves), 2):
             move_num = i // 2 + 1
@@ -592,7 +596,7 @@ def show_result(data):
             with c_w:
                 w_move = st.text_input(
                     f"W{move_num}", value=w_val,
-                    label_visibility="collapsed", key=f"w_{move_num}",
+                    label_visibility="collapsed", key=f"w_{move_num}_g{gen}",
                 )
                 edited_moves.append(w_move)
                 if w_res and not w_res["legal"]:
@@ -600,16 +604,14 @@ def show_result(data):
                     if w_res.get("suggestion"):
                         if st.button(
                             f'Apply: {w_res["suggestion"]}',
-                            key=f"sug_w_{move_num}",
+                            key=f"sug_w_{move_num}_g{gen}",
                         ):
-                            st.session_state.committed_moves[i] = w_res["suggestion"]
-                            val_results[i] = {"legal": True}
-                            st.session_state.validation_results = val_results
+                            st.session_state[f"pending_apply_{i}"] = w_res["suggestion"]
                             st.session_state.pending_revalidate = True
                             st.session_state.pending_pgn_refresh = True
                             st.rerun()
             with c_we:
-                if st.button(":material/arrow_forward:", key=f"edit_w_{move_num}", help=f"Apply edit for white move {move_num}"):
+                if st.button(":material/arrow_forward:", key=f"edit_w_{move_num}_g{gen}", help=f"Apply edit for white move {move_num}"):
                     st.session_state.committed_moves[i] = w_move
                     st.session_state.pending_revalidate = True
                     st.session_state.pending_pgn_refresh = True
@@ -617,7 +619,7 @@ def show_result(data):
             with c_b:
                 b_move = st.text_input(
                     f"B{move_num}", value=b_val,
-                    label_visibility="collapsed", key=f"b_{move_num}",
+                    label_visibility="collapsed", key=f"b_{move_num}_g{gen}",
                 )
                 edited_moves.append(b_move)
                 if b_res and not b_res["legal"]:
@@ -625,22 +627,19 @@ def show_result(data):
                     if b_res.get("suggestion"):
                         if st.button(
                             f'Apply: {b_res["suggestion"]}',
-                            key=f"sug_b_{move_num}",
+                            key=f"sug_b_{move_num}_g{gen}",
                         ):
-                            st.session_state.committed_moves[i + 1] = b_res["suggestion"]
-                            val_results[i + 1] = {"legal": True}
-                            st.session_state.validation_results = val_results
+                            st.session_state[f"pending_apply_{i + 1}"] = b_res["suggestion"]
                             st.session_state.pending_revalidate = True
                             st.session_state.pending_pgn_refresh = True
                             st.rerun()
             with c_be:
                 if i + 1 < len(source_moves):
-                    if st.button(":material/arrow_forward:", key=f"edit_b_{move_num}", help=f"Apply edit for black move {move_num}"):
+                    if st.button(":material/arrow_forward:", key=f"edit_b_{move_num}_g{gen}", help=f"Apply edit for black move {move_num}"):
                         st.session_state.committed_moves[i + 1] = b_move
                         st.session_state.pending_revalidate = True
                         st.session_state.pending_pgn_refresh = True
                         st.rerun()
-
 
     # ── Auto-refresh PGN whenever a move is committed ──
     if st.session_state.pop("pending_pgn_refresh", False):
@@ -669,7 +668,7 @@ def show_result(data):
 
     st.divider()
 
-    # ── Persistent Download PGN button (shown whenever PGN is available) ──
+    # ── Persistent Download PGN button ──
     if st.session_state.get("pgn_bytes"):
         st.download_button(
             label=t["download_pgn"],
@@ -687,7 +686,6 @@ def show_result(data):
             clean_moves = [m for m in edited_moves if m.strip()]
             st.session_state.committed_moves = list(edited_moves)
 
-            # Step 1: validate
             try:
                 val_resp = requests.post(
                     f"{API_URL}/api/validate",
@@ -709,8 +707,6 @@ def show_result(data):
                     else:
                         st.session_state.validation_results = val_data["moves"]
 
-                    # Step 2: fetch PGN and store in session state so the
-                    # download button persists across reruns
                     pgn_payload = {
                         "white": white,
                         "black": black,
@@ -746,8 +742,6 @@ def show_result(data):
             st.session_state.pgn_bytes = None
             st.session_state.pgn_filename = None
             st.rerun()
-
-
 
 # Handle upload
 if uploaded_files:
